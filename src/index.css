@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* AI Dashboard Design System - Exact match to reference image */
+
+@layer base {
+  :root {
+    /* Main Layout Colors */
+    --background: 0 0% 100%;
+    --foreground: 0 0% 20%;
+    
+    /* Sidebar Colors */
+    --sidebar-bg: 240 8% 8%;
+    --sidebar-text: 0 0% 85%;
+    --sidebar-text-muted: 0 0% 60%;
+    --sidebar-hover: 240 8% 12%;
+    --sidebar-active: 240 8% 15%;
+    
+    /* Chat Area Colors */
+    --chat-bg: 0 0% 97%;
+    --chat-text: 0 0% 15%;
+    --chat-text-muted: 0 0% 45%;
+    
+    /* Button Colors */
+    --btn-primary: 0 0% 15%;
+    --btn-primary-text: 0 0% 100%;
+    --btn-secondary: 0 0% 90%;
+    --btn-secondary-text: 0 0% 30%;
+    
+    /* Input Colors */
+    --input-bg: 0 0% 100%;
+    --input-border: 0 0% 85%;
+    --input-text: 0 0% 15%;
+    
+    /* Accent Colors */
+    --accent-blue: 210 100% 50%;
+    --accent-gray: 0 0% 50%;
+    
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Main Layout Colors */
+    --background: 240 8% 8%;
+    --foreground: 0 0% 90%;
+    
+    /* Sidebar Colors */
+    --sidebar-bg: 240 8% 5%;
+    --sidebar-text: 0 0% 85%;
+    --sidebar-text-muted: 0 0% 60%;
+    --sidebar-hover: 240 8% 10%;
+    --sidebar-active: 240 8% 15%;
+    
+    /* Chat Area Colors */
+    --chat-bg: 240 8% 12%;
+    --chat-text: 0 0% 90%;
+    --chat-text-muted: 0 0% 60%;
+    
+    /* Button Colors */
+    --btn-primary: 0 0% 90%;
+    --btn-primary-text: 0 0% 15%;
+    --btn-secondary: 240 8% 20%;
+    --btn-secondary-text: 0 0% 85%;
+    
+    /* Input Colors */
+    --input-bg: 240 8% 15%;
+    --input-border: 240 8% 25%;
+    --input-text: 0 0% 90%;
+    
+    /* Accent Colors */
+    --accent-blue: 210 100% 60%;
+    --accent-gray: 0 0% 50%;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--input-border));
+  }
+
+  body {
+    background: hsl(var(--background));
+     font-family: 'Satoshi', sans-serif;
+    color: hsl(var(--foreground));
+  }
+
+  /* Custom scrollbar styles */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
