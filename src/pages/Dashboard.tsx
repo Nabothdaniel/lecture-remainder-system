@@ -35,7 +35,7 @@ const Dashboard = () => {
 
   const { user, setUser, logout: clearUser } = useUserStore();
   const { lectures, setLectures, addLecture, deleteLecture } = useLectureStore();
-  const { addReminder, scheduleVibrationForReminder } = useReminderStore();
+  const { addReminder} = useReminderStore();
 
   // Automatically manage reminders (frontend only)
   useLectureReminders(lectures, user?.uid, 10);
