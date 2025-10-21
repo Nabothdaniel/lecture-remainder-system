@@ -1,295 +1,476 @@
-import { useState } from 'react';
-import { useAuthStore } from '../store/authStore';
-import { useCourseStore, Course, Lecturer } from '../store/courseStore';
-import { FiLogOut, FiPlus, FiEdit2, FiTrash2, FiBook, FiUsers } from 'react-icons/fi';
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "../hooks/use-toast";
+import { useUserStore } from "../store/authStore";
+import { useCourseStore } from "../store/coursesStore";
+import {
+  FiLogOut,
+  FiPlus,
+  FiEdit2,
+  FiTrash2,
+  FiBook,
+  FiUsers,
+  FiLoader,
+  FiAlertCircle,
+  FiCopy,
+} from "react-icons/fi";
+import { Timestamp } from "firebase/firestore";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase";
 
 const AdminDashboard = () => {
-  const logout = useAuthStore((state) => state.logout);
-  const user = useAuthStore((state) => state.user);
-  const { courses, lecturers, addCourse, addLecturer, deleteCourse, deleteLecturer } = useCourseStore();
-  
-  const [activeTab, setActiveTab] = useState<'courses' | 'lecturers'>('courses');
+  const navigate = useNavigate();
+
+  const logout = useUserStore((state) => state.logout);
+  const user = useUserStore((state) => state.user);
+  const loadingUser = useUserStore((state) => state.loading);
+
+  const {
+    courses,
+    lecturers,
+    loading,
+    error,
+    initSync,
+    addCourse,
+    addLecturer,
+    updateCourse,
+    updateLecturer,
+    deleteCourse,
+    deleteLecturer,
+  } = useCourseStore();
+
+  const [activeTab, setActiveTab] = useState<"courses" | "lecturers">("courses");
   const [showCourseModal, setShowCourseModal] = useState(false);
   const [showLecturerModal, setShowLecturerModal] = useState(false);
-  
+  const [editingCourse, setEditingCourse] = useState<any>(null);
+  const [editingLecturer, setEditingLecturer] = useState<any>(null);
+
   const [courseForm, setCourseForm] = useState({
-    name: '',
-    code: '',
-    faculty: '',
-    lecturerId: '',
-    lecturerName: '',
+    name: "",
+    code: "",
+    faculty: "",
+    department: "",
+    lecturerId: "",
+    lecturerName: "",
   });
-  
+
   const [lecturerForm, setLecturerForm] = useState({
-    name: '',
-    email: '',
+    name: "",
+    email: "",
+    faculty: "",
+    department: "",
     assignedCourses: [] as string[],
   });
 
-  const handleAddCourse = (e: React.FormEvent) => {
-    e.preventDefault();
-    const lecturer = lecturers.find(l => l.id === courseForm.lecturerId);
-    if (lecturer) {
-      addCourse({
-        ...courseForm,
-        lecturerName: lecturer.name,
-      });
-      setCourseForm({ name: '', code: '', faculty: '', lecturerId: '', lecturerName: '' });
-      setShowCourseModal(false);
+  const [ setGeneratedPassword] = useState<string>("");
+
+  const [courseFilter, setCourseFilter] = useState({ faculty: "", department: "" });
+  const [lecturerFilter, setLecturerFilter] = useState({ faculty: "", department: "" });
+
+  useEffect(() => {
+    if (user) {
+      const unsub = initSync();
+      return () => unsub && unsub();
     }
+  }, [user, initSync]);
+
+  if (loadingUser || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-gray-500">
+        <FiLoader className="animate-spin mr-2" size={24} /> Loading user info...
+      </div>
+    );
+  }
+
+  const filteredCourses = courses.filter(
+    (c) =>
+      (!courseFilter.faculty || c.faculty === courseFilter.faculty) &&
+      (!courseFilter.department || c.department === courseFilter.department)
+  );
+
+  const filteredLecturers = lecturers.filter(
+    (l) =>
+      (!lecturerFilter.faculty || l.faculty === lecturerFilter.faculty) &&
+      (!lecturerFilter.department || l.department === lecturerFilter.department)
+  );
+
+  const generatePassword = (length = 8) => {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%";
+    let pass = "";
+    for (let i = 0; i < length; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return pass;
   };
 
-  const handleAddLecturer = (e: React.FormEvent) => {
+ const handleLogout = async () => {
+  try {
+    await signOut(auth);
+    toast.success("Logged out successfully");
+    navigate("/auth");
+  } catch (err) {
+    toast.error("Failed to logout");
+    console.error(err);
+  }
+};
+
+
+  const handleSaveCourse = async (e: React.FormEvent) => {
     e.preventDefault();
-    addLecturer(lecturerForm);
-    setLecturerForm({ name: '', email: '', assignedCourses: [] });
+    const lecturer = lecturers.find((l) => l.id === courseForm.lecturerId);
+    if (!lecturer) return toast.error("Please assign a lecturer");
+
+    if (editingCourse) {
+      await updateCourse(editingCourse.id, { ...courseForm, lecturerName: lecturer.name });
+      toast.success("Course updated");
+    } else {
+      await addCourse({ ...courseForm, lecturerName: lecturer.name });
+      toast.success("Course added");
+    }
+
+    setShowCourseModal(false);
+    setEditingCourse(null);
+    setCourseForm({ name: "", code: "", faculty: "", department: "", lecturerId: "", lecturerName: "" });
+  };
+
+  const handleSaveLecturer = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    let password = editingLecturer ? undefined : generatePassword();
+    
+    const lecturerData = { ...lecturerForm, password };
+
+    if (editingLecturer) {
+      await updateLecturer(editingLecturer.id, lecturerForm);
+      toast.success("Lecturer updated");
+    } else {
+      await addLecturer(lecturerData);
+      if (password) {
+        navigator.clipboard.writeText(password);
+        toast.success(`Lecturer added! Password copied to clipboard: ${password}`);
+      }
+    }
+
     setShowLecturerModal(false);
+    setEditingLecturer(null);
+    setLecturerForm({ name: "", email: "", faculty: "", department: "", assignedCourses: [] });
+  };
+
+  const handleEditCourse = (course: any) => {
+    setEditingCourse(course);
+    setCourseForm(course);
+    setShowCourseModal(true);
+  };
+
+  const handleEditLecturer = (lecturer: any) => {
+    setEditingLecturer(lecturer);
+    setLecturerForm(lecturer);
+    setShowLecturerModal(true);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-purple-700 to-pink-500">
+    <div className="min-h-screen bg-gray-50 text-gray-900">
       {/* Header */}
-      <div className="bg-white/10 backdrop-blur-lg border-b border-white/20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+      <header className="bg-black text-white shadow-md">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold text-white">Admin Dashboard</h1>
-            <p className="text-white/80 text-sm">Welcome, {user?.name}</p>
+            <h1 className="text-2xl font-bold">Admin Dashboard</h1>
+            <p className="text-sm text-gray-300">Welcome, {user.email}</p>
           </div>
           <button
-            onClick={logout}
-            className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg transition-all"
+            onClick={handleLogout}
+            className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded-md font-semibold hover:bg-gray-200 transition"
           >
             <FiLogOut /> Logout
           </button>
         </div>
-      </div>
+      </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Tabs */}
-        <div className="flex gap-4 mb-6">
-          <button
-            onClick={() => setActiveTab('courses')}
-            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all ${
-              activeTab === 'courses'
-                ? 'bg-white text-purple-700 shadow-lg'
-                : 'bg-white/10 text-white hover:bg-white/20'
-            }`}
-          >
-            <FiBook /> Courses
-          </button>
-          <button
-            onClick={() => setActiveTab('lecturers')}
-            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all ${
-              activeTab === 'lecturers'
-                ? 'bg-white text-purple-700 shadow-lg'
-                : 'bg-white/10 text-white hover:bg-white/20'
-            }`}
-          >
-            <FiUsers /> Lecturers
-          </button>
+      {/* Tabs + Add buttons */}
+      <div className="max-w-7xl mx-auto px-6 py-6 flex flex-wrap gap-3 items-center">
+        <div className="flex gap-3">
+          {["courses", "lecturers"].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab as any)}
+              className={`flex items-center gap-2 px-6 py-2 rounded-md font-semibold transition ${activeTab === tab
+                ? "bg-black text-white"
+                : "bg-white hover:bg-gray-100 text-black"
+                }`}
+            >
+              {tab === "courses" ? <FiBook /> : <FiUsers />}
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
         </div>
 
-        {/* Courses Tab */}
-        {activeTab === 'courses' && (
-          <div>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-white">Manage Courses</h2>
-              <button
-                onClick={() => setShowCourseModal(true)}
-                className="flex items-center gap-2 bg-gradient-to-r from-pink-500 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:from-pink-600 hover:to-purple-700 transition-all shadow-lg"
-              >
-                <FiPlus /> Add Course
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {courses.map((course) => (
-                <div
-                  key={course.id}
-                  className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20 hover:bg-white/20 transition-all"
-                >
-                  <h3 className="text-xl font-bold text-white mb-2">{course.name}</h3>
-                  <p className="text-white/80 text-sm mb-1">Code: {course.code}</p>
-                  <p className="text-white/80 text-sm mb-1">Faculty: {course.faculty}</p>
-                  <p className="text-white/80 text-sm mb-4">Lecturer: {course.lecturerName}</p>
-                  <div className="flex gap-2">
-                    <button className="flex-1 flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-all">
-                      <FiEdit2 size={16} /> Edit
-                    </button>
-                    <button
-                      onClick={() => deleteCourse(course.id)}
-                      className="flex-1 flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-all"
-                    >
-                      <FiTrash2 size={16} /> Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Lecturers Tab */}
-        {activeTab === 'lecturers' && (
-          <div>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-white">Manage Lecturers</h2>
-              <button
-                onClick={() => setShowLecturerModal(true)}
-                className="flex items-center gap-2 bg-gradient-to-r from-pink-500 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:from-pink-600 hover:to-purple-700 transition-all shadow-lg"
-              >
-                <FiPlus /> Add Lecturer
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {lecturers.map((lecturer) => (
-                <div
-                  key={lecturer.id}
-                  className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20 hover:bg-white/20 transition-all"
-                >
-                  <h3 className="text-xl font-bold text-white mb-2">{lecturer.name}</h3>
-                  <p className="text-white/80 text-sm mb-4">{lecturer.email}</p>
-                  <p className="text-white/80 text-sm mb-4">
-                    Courses: {courses.filter(c => c.lecturerId === lecturer.id).length}
-                  </p>
-                  <div className="flex gap-2">
-                    <button className="flex-1 flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-all">
-                      <FiEdit2 size={16} /> Edit
-                    </button>
-                    <button
-                      onClick={() => deleteLecturer(lecturer.id)}
-                      className="flex-1 flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-all"
-                    >
-                      <FiTrash2 size={16} /> Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <div className="ml-auto flex gap-3">
+          {activeTab === "courses" && (
+            <button
+              onClick={() => setShowCourseModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800"
+            >
+              <FiPlus /> Add Course
+            </button>
+          )}
+          {activeTab === "lecturers" && (
+            <button
+              onClick={() => setShowLecturerModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800"
+            >
+              <FiPlus /> Add Lecturer
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Add Course Modal */}
-      {showCourseModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Add New Course</h2>
-            <form onSubmit={handleAddCourse} className="space-y-4">
-              <div>
-                <label className="block text-gray-700 text-sm font-medium mb-2">Course Name</label>
-                <input
-                  type="text"
-                  value={courseForm.name}
-                  onChange={(e) => setCourseForm({ ...courseForm, name: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-gray-700 text-sm font-medium mb-2">Course Code</label>
-                <input
-                  type="text"
-                  value={courseForm.code}
-                  onChange={(e) => setCourseForm({ ...courseForm, code: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-gray-700 text-sm font-medium mb-2">Faculty</label>
-                <input
-                  type="text"
-                  value={courseForm.faculty}
-                  onChange={(e) => setCourseForm({ ...courseForm, faculty: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-gray-700 text-sm font-medium mb-2">Assign Lecturer</label>
-                <select
-                  value={courseForm.lecturerId}
-                  onChange={(e) => setCourseForm({ ...courseForm, lecturerId: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  required
-                >
-                  <option value="">Select Lecturer</option>
-                  {lecturers.map((lecturer) => (
-                    <option key={lecturer.id} value={lecturer.id}>
-                      {lecturer.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-4 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowCourseModal(false)}
-                  className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 rounded-lg transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-semibold py-2 rounded-lg transition-all"
-                >
-                  Add Course
-                </button>
-              </div>
-            </form>
-          </div>
+      {/* Loading / Error */}
+      {loading && (
+        <div className="flex justify-center items-center py-10 text-gray-500">
+          <FiLoader className="animate-spin mr-2" /> Loading data...
+        </div>
+      )}
+      {error && (
+        <div className="flex justify-center items-center py-4 text-red-500 gap-2">
+          <FiAlertCircle /> {error}
         </div>
       )}
 
-      {/* Add Lecturer Modal */}
-      {showLecturerModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Add New Lecturer</h2>
-            <form onSubmit={handleAddLecturer} className="space-y-4">
-              <div>
-                <label className="block text-gray-700 text-sm font-medium mb-2">Lecturer Name</label>
-                <input
-                  type="text"
-                  value={lecturerForm.name}
-                  onChange={(e) => setLecturerForm({ ...lecturerForm, name: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-gray-700 text-sm font-medium mb-2">Email</label>
-                <input
-                  type="email"
-                  value={lecturerForm.email}
-                  onChange={(e) => setLecturerForm({ ...lecturerForm, email: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  required
-                />
-              </div>
-              <div className="flex gap-4 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowLecturerModal(false)}
-                  className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 rounded-lg transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-semibold py-2 rounded-lg transition-all"
-                >
-                  Add Lecturer
-                </button>
-              </div>
-            </form>
-          </div>
+      {/* Filters */}
+      {!loading && (
+        <div className="max-w-7xl mx-auto px-6 pb-4 flex flex-wrap gap-3">
+          {activeTab === "courses" &&
+            ["faculty", "department"].map((field) => (
+              <select
+                key={field}
+                value={(courseFilter as any)[field]}
+                onChange={(e) =>
+                  setCourseFilter({ ...courseFilter, [field]: e.target.value })
+                }
+                className="bg-white border border-gray-300 px-3 py-2 rounded-md"
+              >
+                <option value="">{`All ${field.charAt(0).toUpperCase() + field.slice(1)}s`}</option>
+                {[...new Set(courses.map((c) => c[field as keyof typeof c]))].map((val) => (
+                  <option key={val?.toString()} value={val?.toString()}>
+                    {val instanceof Timestamp ? val.toDate().toLocaleString() : val?.toString()}
+                  </option>
+                ))}
+              </select>
+            ))}
+          {activeTab === "lecturers" &&
+            ["faculty", "department"].map((field) => (
+              <select
+                key={field}
+                value={(lecturerFilter as any)[field]}
+                onChange={(e) =>
+                  setLecturerFilter({ ...lecturerFilter, [field]: e.target.value })
+                }
+                className="bg-white border border-gray-300 px-3 py-2 rounded-md"
+              >
+                <option value="">{`All ${field.charAt(0).toUpperCase() + field.slice(1)}s`}</option>
+                {[...new Set(courses.map((c) => c[field as keyof typeof c]))].map((val) => (
+                  <option key={val?.toString()} value={val?.toString()}>
+                    {val instanceof Timestamp ? val.toDate().toLocaleString() : val?.toString()}
+                  </option>
+                ))}
+              </select>
+            ))}
+          <button
+            onClick={() => {
+              setCourseFilter({ faculty: "", department: "" });
+              setLecturerFilter({ faculty: "", department: "" });
+            }}
+            className="bg-black text-white px-3 py-2 rounded-md"
+          >
+            Reset Filters
+          </button>
         </div>
+      )}
+
+      {/* Content */}
+      {!loading && (
+        <div className="max-w-7xl mx-auto px-6 pb-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {activeTab === "courses"
+            ? filteredCourses.map((course) => (
+              <div
+                key={course.id}
+                className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all"
+              >
+                <h3 className="text-lg font-bold">{course.name}</h3>
+                <p className="text-sm text-gray-500 mt-1">Code: {course.code}</p>
+                <p className="text-sm text-gray-500">Faculty: {course.faculty}</p>
+                <p className="text-sm text-gray-500">Department: {course.department}</p>
+                <p className="text-sm text-gray-500 mb-4">Lecturer: {course.lecturerName}</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleEditCourse(course)}
+                    className="flex-1 bg-black hover:bg-gray-800 text-white px-3 py-2 rounded-md flex items-center justify-center gap-2"
+                  >
+                    <FiEdit2 /> Edit
+                  </button>
+                  <button
+                    onClick={() => deleteCourse(course.id)}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md flex items-center justify-center gap-2"
+                  >
+                    <FiTrash2 /> Delete
+                  </button>
+                </div>
+              </div>
+            ))
+            : filteredLecturers.map((lecturer) => (
+              <div
+                key={lecturer.id}
+                className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all"
+              >
+                <h3 className="text-lg font-bold">{lecturer.name}</h3>
+                <p className="text-sm text-gray-500">{lecturer.email}</p>
+                <p className="text-sm text-gray-500">Faculty: {lecturer.faculty}</p>
+                <p className="text-sm text-gray-500 mb-4">Department: {lecturer.department}</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleEditLecturer(lecturer)}
+                    className="flex-1 bg-black hover:bg-gray-800 text-white px-3 py-2 rounded-md flex items-center justify-center gap-2"
+                  >
+                    <FiEdit2 /> Edit
+                  </button>
+                  <button
+                    onClick={() => deleteLecturer(lecturer.id)}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md flex items-center justify-center gap-2"
+                  >
+                    <FiTrash2 /> Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+        </div>
+      )}
+
+      {/* Modals */}
+      {showCourseModal && (
+        <Modal
+          title={editingCourse ? "Edit Course" : "Add New Course"}
+          onClose={() => setShowCourseModal(false)}
+          onSubmit={handleSaveCourse}
+        >
+          <div className="space-y-4">
+            {["name", "code", "faculty", "department"].map((field) => (
+              <Input
+                key={field}
+                label={`Course ${field.charAt(0).toUpperCase() + field.slice(1)}`}
+                value={(courseForm as any)[field]}
+                onChange={(e) =>
+                  setCourseForm({ ...courseForm, [field]: e.target.value })
+                }
+              />
+            ))}
+
+            <div>
+              <label className="block text-sm text-gray-600 mb-1">Assign Lecturer</label>
+              <select
+                value={courseForm.lecturerId}
+                onChange={(e) =>
+                  setCourseForm({ ...courseForm, lecturerId: e.target.value })
+                }
+                className="w-full bg-white border border-gray-300 rounded-md px-3 py-2 focus:ring-1 focus:ring-black"
+              >
+                <option value="">Select Lecturer</option>
+                {lecturers.map((lecturer) => (
+                  <option key={lecturer.id} value={lecturer.id} className="inline-flex items-center ">
+                    {`${lecturer.name} - ${lecturer.department}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showLecturerModal && (
+        <Modal
+          title={editingLecturer ? "Edit Lecturer" : "Add New Lecturer"}
+          onClose={() => setShowLecturerModal(false)}
+          onSubmit={handleSaveLecturer}
+        >
+          <div className="space-y-4">
+            {["name", "email", "faculty", "department"].map((field) => (
+              <Input
+                key={field}
+                label={field.charAt(0).toUpperCase() + field.slice(1)}
+                type={field === "email" ? "email" : "text"}
+                value={(lecturerForm as any)[field]}
+                onChange={(e) =>
+                  setLecturerForm({ ...lecturerForm, [field]: e.target.value })
+                }
+              />
+            ))}
+          </div>
+        </Modal>
       )}
     </div>
   );
 };
 
 export default AdminDashboard;
+
+
+
+// ─────────────────────────────
+// 🧱 Reusable Components
+// ─────────────────────────────
+const Input = ({
+  label,
+  type = "text",
+  value,
+  onChange,
+}: {
+  label: string;
+  type?: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}) => (
+  <div>
+    <label className="block text-sm text-gray-600 mb-1">{label}</label>
+    <input
+      type={type}
+      value={value}
+      onChange={onChange}
+      className="w-full bg-white border border-black rounded-md px-3 py-2 text-black focus:ring-1 focus:ring-black"
+    />
+  </div>
+);
+
+const Modal = ({
+  title,
+  onClose,
+  onSubmit,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  onSubmit: (e: React.FormEvent) => void;
+  children: React.ReactNode;
+}) => (
+  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div className="bg-white border border-black rounded-xl p-6 w-full max-w-md">
+      <h2 className="text-xl font-bold mb-4 text-black">{title}</h2>
+      <form onSubmit={onSubmit} className="space-y-6">
+        {children}
+        <div className="flex gap-3 pt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-md"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="flex-1 bg-black text-white px-4 py-2 rounded-md font-semibold hover:bg-gray-800"
+          >
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+);

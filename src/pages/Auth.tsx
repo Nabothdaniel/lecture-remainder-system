@@ -1,87 +1,117 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  onAuthStateChanged
-} from 'firebase/auth';
-import { auth } from '@/firebase/index';
-import { useUserStore } from '@/store/useUserStore';
-import { toast } from '@/hooks/use-toast';
-import { FiMail, FiLock, FiBook } from 'react-icons/fi';
-import gsap from 'gsap';
+} from "firebase/auth";
+import { doc, setDoc, getDoc } from "firebase/firestore";
+import { auth, db } from "@/firebase";
+import { useUserStore } from "@/store/authStore";
+import { toast } from "@/hooks/use-toast";
+import { FiMail, FiLock, FiBook } from "react-icons/fi";
+import gsap from "gsap";
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"student" | "lecturer" | "admin" | "">("");
   const [loading, setLoading] = useState(false);
+
   const navigate = useNavigate();
-  const { setUser, user } = useUserStore();
+  const { user, setUser } = useUserStore();
 
+  // Redirect when user is logged in
   useEffect(() => {
-    if (user) navigate('/dashboard');
+    if (user) {
+      switch (user.role) {
+        case "admin":
+          navigate("/admin-dashboard");
+          break;
+        case "lecturer":
+          navigate("/lecturer-dashboard");
+          break;
+        default:
+          navigate("/student-dashboard");
+      }
+    }
+  }, [user, navigate]);
 
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) navigate('/dashboard');
-    });
-
-    return () => unsubscribe();
-  }, [user, navigate, setUser]);
-
+  // GSAP animations
   useEffect(() => {
     gsap.fromTo(
-      '.auth-card',
+      ".auth-card",
       { opacity: 0, y: 30 },
-      { opacity: 1, y: 0, duration: 0.6, ease: 'power3.out' }
+      { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }
     );
-
     gsap.fromTo(
-      '.auth-icon',
+      ".auth-icon",
       { scale: 0 },
-      { scale: 1, duration: 0.5, delay: 0.3, ease: 'back.out(1.7)' }
+      { scale: 1, duration: 0.5, delay: 0.3, ease: "back.out(1.7)" }
     );
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
-    if (!email || !password) {
-      toast.error('Please fill in all fields');
-      return;
-    }
-
-    if (password.length < 6) {
-      toast.error('Password must be at least 6 characters');
-  
-      return;
-    }
+    if (!email || !password) return toast.error("Please fill in all fields");
+    if (!isLogin && !role) return toast.error("Please select a role");
+    if (password.length < 6)
+      return toast.error("Password must be at least 6 characters");
 
     setLoading(true);
 
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
-        toast.success('logged in successfully');
+        // Sign in
+        const userCred = await signInWithEmailAndPassword(auth, email, password);
+        const userRef = doc(db, "users", userCred.user.uid);
+        const userSnap = await getDoc(userRef);
+        const userData = userSnap.data();
+
+        setUser({
+          uid: userCred.user.uid,
+          email: userCred.user.email || "",
+          name: userData?.name || "",
+          role: userData?.role || "",
+        });
+
+        toast.success("Logged in successfully");
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
-        toast.success('Account created successfully');
+        // Sign up
+        const userCred = await createUserWithEmailAndPassword(auth, email, password);
+        const newUser = userCred.user;
 
+        await setDoc(doc(db, "users", newUser.uid), {
+          uid: newUser.uid,
+          email,
+          role,
+          createdAt: new Date().toISOString(),
+        });
+
+        setUser({
+          uid: newUser.uid,
+          email: newUser.email || "",
+          role,
+        });
+
+        toast.success("Account created successfully");
       }
-      navigate('/dashboard');
     } catch (error: any) {
-      let errorMessage = 'An error occurred';
-
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-        errorMessage = 'Invalid email or password';
-      } else if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'Email already in use';
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = 'Invalid email address';
+      let errorMessage = "An error occurred";
+      switch (error.code) {
+        case "auth/user-not-found":
+        case "auth/wrong-password":
+          errorMessage = "Invalid email or password";
+          break;
+        case "auth/email-already-in-use":
+          errorMessage = "Email already in use";
+          break;
+        case "auth/invalid-email":
+          errorMessage = "Invalid email address";
+          break;
       }
-
-      toast.error('Authentication Error', errorMessage);
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -90,7 +120,7 @@ const Auth = () => {
   const toggleMode = () => {
     setIsLogin(!isLogin);
     gsap.fromTo(
-      '.auth-form',
+      ".auth-form",
       { opacity: 0, x: -20 },
       { opacity: 1, x: 0, duration: 0.3 }
     );
@@ -105,12 +135,11 @@ const Auth = () => {
           </div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Lecture Reminder</h1>
           <p className="text-gray-500 dark:text-gray-400 mt-2">
-            {isLogin ? 'Welcome back!' : 'Create your account'}
+            {isLogin ? "Welcome back!" : "Create your account"}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form space-y-4">
-          {/* Email Field */}
           <div className="relative">
             <FiMail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -123,7 +152,6 @@ const Auth = () => {
             />
           </div>
 
-          {/* Password Field */}
           <div className="relative">
             <FiLock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -136,17 +164,33 @@ const Auth = () => {
             />
           </div>
 
-          {/* Submit Button */}
+          {!isLogin && (
+            <div className="relative">
+              <label className="block text-sm mb-1 text-gray-600 dark:text-gray-300">
+                Select Role
+              </label>
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value as "student" | "lecturer" | "admin" | "")}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg dark:bg-gray-800 dark:text-white dark:border-gray-700 focus:ring-2 focus:ring-gray-900"
+                disabled={loading}
+              >
+                <option value="">Choose Role</option>
+                <option value="student">Student</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={loading}
             className="w-full bg-black text-white py-3 rounded-lg hover:opacity-90 transition-all duration-200 font-semibold shadow-md disabled:opacity-60"
           >
-            {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Sign Up'}
+            {loading ? "Please wait..." : isLogin ? "Sign In" : "Sign Up"}
           </button>
         </form>
 
-        {/* Toggle Mode */}
         <div className="mt-6 text-center">
           <button
             onClick={toggleMode}
@@ -155,7 +199,7 @@ const Auth = () => {
           >
             {isLogin
               ? "Don't have an account? Sign up"
-              : 'Already have an account? Sign in'}
+              : "Already have an account? Sign in"}
           </button>
         </div>
       </div>
