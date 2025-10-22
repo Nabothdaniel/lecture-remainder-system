@@ -1,8 +1,15 @@
+import { useEffect } from "react";
 import { Outlet } from "react-router-dom";
+import { useUserStore } from "./store/authStore";
 
 
 const App = () => {
-  return <Outlet />
+  useEffect(() => {
+  useUserStore.getState().initAuth();
+}, []);
+
+
+  return( <Outlet />)
 }
 
 export default App
