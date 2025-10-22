@@ -21,7 +21,6 @@ import { auth } from "../firebase";
 const AdminDashboard = () => {
   const navigate = useNavigate();
 
-  const logout = useUserStore((state) => state.logout);
   const user = useUserStore((state) => state.user);
   const loadingUser = useUserStore((state) => state.loading);
 
@@ -62,10 +61,9 @@ const AdminDashboard = () => {
     assignedCourses: [] as string[],
   });
 
-  const [ setGeneratedPassword] = useState<string>("");
-
   const [courseFilter, setCourseFilter] = useState({ faculty: "", department: "" });
   const [lecturerFilter, setLecturerFilter] = useState({ faculty: "", department: "" });
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (user) {
@@ -103,28 +101,50 @@ const AdminDashboard = () => {
     return pass;
   };
 
- const handleLogout = async () => {
-  try {
-    await signOut(auth);
-    toast.success("Logged out successfully");
-    navigate("/auth");
-  } catch (err) {
-    toast.error("Failed to logout");
-    console.error(err);
-  }
-};
+  const handleShowPassword = (lecturerId: string) => {
+    setVisiblePasswords((prev) => ({ ...prev, [lecturerId]: true }));
+    setTimeout(() => {
+      setVisiblePasswords((prev) => ({ ...prev, [lecturerId]: false }));
+    }, 5000);
+  };
 
+  const handleCopyPassword = (password: string) => {
+    navigator.clipboard.writeText(password);
+    toast.success("Password copied to clipboard!");
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      toast.success("Logged out successfully");
+      navigate("/auth");
+    } catch (err) {
+      toast.error("Failed to logout");
+      console.error(err);
+    }
+  };
 
   const handleSaveCourse = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!courseForm.lecturerId) return toast.error("Please assign a lecturer");
+
     const lecturer = lecturers.find((l) => l.id === courseForm.lecturerId);
-    if (!lecturer) return toast.error("Please assign a lecturer");
+    if (!lecturer) return toast.error("Invalid lecturer selected");
 
     if (editingCourse) {
-      await updateCourse(editingCourse.id, { ...courseForm, lecturerName: lecturer.name });
+      await updateCourse(editingCourse.id, {
+        ...courseForm,
+        lecturerName: lecturer.name,
+        lecturerId: lecturer.uid || "",
+      });
       toast.success("Course updated");
     } else {
-      await addCourse({ ...courseForm, lecturerName: lecturer.name });
+      await addCourse({
+        ...courseForm,
+        lecturerId: lecturer.uid || "",
+        lecturerName: lecturer.name,
+      });
       toast.success("Course added");
     }
 
@@ -136,8 +156,7 @@ const AdminDashboard = () => {
   const handleSaveLecturer = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    let password = editingLecturer ? undefined : generatePassword();
-    
+    const password = editingLecturer ? undefined : generatePassword();
     const lecturerData = { ...lecturerForm, password };
 
     if (editingLecturer) {
@@ -145,10 +164,7 @@ const AdminDashboard = () => {
       toast.success("Lecturer updated");
     } else {
       await addLecturer(lecturerData);
-      if (password) {
-        navigator.clipboard.writeText(password);
-        toast.success(`Lecturer added! Password copied to clipboard: ${password}`);
-      }
+      if (password) handleCopyPassword(password);
     }
 
     setShowLecturerModal(false);
@@ -186,7 +202,7 @@ const AdminDashboard = () => {
         </div>
       </header>
 
-      {/* Tabs + Add buttons */}
+      {/* Tabs */}
       <div className="max-w-7xl mx-auto px-6 py-6 flex flex-wrap gap-3 items-center">
         <div className="flex gap-3">
           {["courses", "lecturers"].map((tab) => (
@@ -268,13 +284,14 @@ const AdminDashboard = () => {
                 className="bg-white border border-gray-300 px-3 py-2 rounded-md"
               >
                 <option value="">{`All ${field.charAt(0).toUpperCase() + field.slice(1)}s`}</option>
-                {[...new Set(courses.map((c) => c[field as keyof typeof c]))].map((val) => (
+                {[...new Set(lecturers.map((l) => l[field as keyof typeof l]))].map((val) => (
                   <option key={val?.toString()} value={val?.toString()}>
-                    {val instanceof Timestamp ? val.toDate().toLocaleString() : val?.toString()}
+                    {val?.toString()}
                   </option>
                 ))}
               </select>
             ))}
+
           <button
             onClick={() => {
               setCourseFilter({ faculty: "", department: "" });
@@ -320,13 +337,25 @@ const AdminDashboard = () => {
             : filteredLecturers.map((lecturer) => (
               <div
                 key={lecturer.id}
-                className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all"
+                className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all relative"
               >
                 <h3 className="text-lg font-bold">{lecturer.name}</h3>
                 <p className="text-sm text-gray-500">{lecturer.email}</p>
                 <p className="text-sm text-gray-500">Faculty: {lecturer.faculty}</p>
                 <p className="text-sm text-gray-500 mb-4">Department: {lecturer.department}</p>
-                <div className="flex gap-2">
+
+                {/* Password Tooltip */}
+                {visiblePasswords[lecturer.id] && lecturer.password && (
+                  <div
+                    className="absolute top-2 right-2 bg-black text-white px-3 py-1 rounded-md flex items-center gap-2 shadow-lg z-10 cursor-pointer"
+                    onClick={() => handleCopyPassword(lecturer.password)}
+                  >
+                    <span>{lecturer.password}</span>
+                    <FiCopy />
+                  </div>
+                )}
+
+                <div className="flex gap-2 mt-2">
                   <button
                     onClick={() => handleEditLecturer(lecturer)}
                     className="flex-1 bg-black hover:bg-gray-800 text-white px-3 py-2 rounded-md flex items-center justify-center gap-2"
@@ -339,6 +368,14 @@ const AdminDashboard = () => {
                   >
                     <FiTrash2 /> Delete
                   </button>
+                  {lecturer.password && (
+                    <button
+                      onMouseEnter={() => handleShowPassword(lecturer.id)}
+                      className="text-sm text-blue-600 underline"
+                    >
+                      Show Password
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -347,35 +384,26 @@ const AdminDashboard = () => {
 
       {/* Modals */}
       {showCourseModal && (
-        <Modal
-          title={editingCourse ? "Edit Course" : "Add New Course"}
-          onClose={() => setShowCourseModal(false)}
-          onSubmit={handleSaveCourse}
-        >
+        <Modal title={editingCourse ? "Edit Course" : "Add New Course"} onClose={() => setShowCourseModal(false)} onSubmit={handleSaveCourse}>
           <div className="space-y-4">
             {["name", "code", "faculty", "department"].map((field) => (
               <Input
                 key={field}
                 label={`Course ${field.charAt(0).toUpperCase() + field.slice(1)}`}
                 value={(courseForm as any)[field]}
-                onChange={(e) =>
-                  setCourseForm({ ...courseForm, [field]: e.target.value })
-                }
+                onChange={(e) => setCourseForm({ ...courseForm, [field]: e.target.value })}
               />
             ))}
-
             <div>
               <label className="block text-sm text-gray-600 mb-1">Assign Lecturer</label>
               <select
                 value={courseForm.lecturerId}
-                onChange={(e) =>
-                  setCourseForm({ ...courseForm, lecturerId: e.target.value })
-                }
+                onChange={(e) => setCourseForm({ ...courseForm, lecturerId: e.target.value })}
                 className="w-full bg-white border border-gray-300 rounded-md px-3 py-2 focus:ring-1 focus:ring-black"
               >
                 <option value="">Select Lecturer</option>
                 {lecturers.map((lecturer) => (
-                  <option key={lecturer.id} value={lecturer.id} className="inline-flex items-center ">
+                  <option key={lecturer.id} value={lecturer.id}>
                     {`${lecturer.name} - ${lecturer.department}`}
                   </option>
                 ))}
@@ -386,11 +414,7 @@ const AdminDashboard = () => {
       )}
 
       {showLecturerModal && (
-        <Modal
-          title={editingLecturer ? "Edit Lecturer" : "Add New Lecturer"}
-          onClose={() => setShowLecturerModal(false)}
-          onSubmit={handleSaveLecturer}
-        >
+        <Modal title={editingLecturer ? "Edit Lecturer" : "Add New Lecturer"} onClose={() => setShowLecturerModal(false)} onSubmit={handleSaveLecturer}>
           <div className="space-y-4">
             {["name", "email", "faculty", "department"].map((field) => (
               <Input
@@ -398,9 +422,7 @@ const AdminDashboard = () => {
                 label={field.charAt(0).toUpperCase() + field.slice(1)}
                 type={field === "email" ? "email" : "text"}
                 value={(lecturerForm as any)[field]}
-                onChange={(e) =>
-                  setLecturerForm({ ...lecturerForm, [field]: e.target.value })
-                }
+                onChange={(e) => setLecturerForm({ ...lecturerForm, [field]: e.target.value })}
               />
             ))}
           </div>
@@ -411,8 +433,6 @@ const AdminDashboard = () => {
 };
 
 export default AdminDashboard;
-
-
 
 // ─────────────────────────────
 // 🧱 Reusable Components

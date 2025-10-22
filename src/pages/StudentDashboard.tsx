@@ -1,18 +1,27 @@
 import { useState } from 'react';
 import { useUserStore } from '../store/authStore';
-import { useCourseStore, Course } from '../store/coursesStore';
-import { FiLogOut, FiSearch, FiCalendar, FiClock, FiPlus, FiTrash2, FiBell, FiFilter } from 'react-icons/fi';
+import { useCourseStore, Course, Lecture } from '../store/coursesStore';
+import { FiLogOut, FiSearch,  FiPlus, FiTrash2, FiBell, FiFilter } from 'react-icons/fi';
+import { signOut } from 'firebase/auth';
+import { auth } from '@/firebase';
+import { useNavigate } from 'react-router-dom';
+import { toast } from '@/hooks/use-toast';
 import axios from 'axios';
 
 const StudentDashboard = () => {
   const logout = useUserStore((state) => state.logout);
   const user = useUserStore((state) => state.user);
-  const { courses, reminders, addReminder, deleteReminder } = useCourseStore();
+  const navigate = useNavigate();
+
+  // Zustand store
+  const { courses, lectures, reminders, addReminder, deleteReminder } = useCourseStore();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFaculty, setSelectedFaculty] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
+  const [selectedLecture, setSelectedLecture] = useState<Lecture | null>(null);
   const [loading, setLoading] = useState(false);
 
   const [reminderForm, setReminderForm] = useState({
@@ -23,32 +32,57 @@ const StudentDashboard = () => {
   });
 
   const faculties = Array.from(new Set(courses.map(c => c.faculty)));
+  const departments = Array.from(new Set(courses.map(c => c.department)));
 
+  // Filter courses by search, faculty, and department
   const filteredCourses = courses.filter(course => {
     const matchesSearch =
       course.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       course.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
       course.lecturerName.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFaculty = !selectedFaculty || course.faculty === selectedFaculty;
-    return matchesSearch && matchesFaculty;
+    const matchesDepartment = !selectedDepartment || course.department === selectedDepartment;
+    return matchesSearch && matchesFaculty && matchesDepartment;
   });
 
   const myReminders = reminders.filter(r => r.studentId === user?.uid);
 
+  // Handle course selection for setting reminder
+  const handleSelectCourse = (course: Course) => {
+    const upcomingLecture = lectures
+      .filter(l => l.courseId === course.id)
+      .find(l => new Date(l.date + ' ' + l.time).getTime() > Date.now());
+
+    if (!upcomingLecture) {
+      alert("No upcoming lectures available for reminders.");
+      return;
+    }
+
+    setSelectedCourse(course);
+    setSelectedLecture(upcomingLecture);
+    setReminderForm({
+      date: upcomingLecture.date,
+      time: upcomingLecture.time,
+      topic: '',
+      notes: '',
+    });
+    setShowReminderModal(true);
+  };
+
+  // Add reminder
   const handleAddReminder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCourse || !user) return;
+    if (!selectedCourse || !user || !selectedLecture) return;
 
     setLoading(true);
     try {
-      // Save to local store
       addReminder({
         courseId: selectedCourse.id,
+        lectureId: selectedLecture.id,
         studentId: user.uid,
         ...reminderForm,
       });
 
-      // Send email to backend
       await axios.post(`${import.meta.env.VITE_API_URL}/send-reminder-email`, {
         email: user.email,
         name: user.name,
@@ -60,8 +94,9 @@ const StudentDashboard = () => {
       });
 
       setReminderForm({ date: '', time: '', topic: '', notes: '' });
-      setShowReminderModal(false);
       setSelectedCourse(null);
+      setSelectedLecture(null);
+      setShowReminderModal(false);
     } catch (error) {
       console.error("Error setting reminder:", error);
       alert("Failed to set reminder or send email. Try again.");
@@ -70,6 +105,17 @@ const StudentDashboard = () => {
     }
   };
 
+  const handleLogout = async () => {
+      try {
+        await signOut(auth);
+        toast.success("Logged out successfully.");
+        navigate("/auth");
+      } catch (err) {
+        console.error("Logout error:", err);
+        toast.error((err as Error).message);
+      }
+    };
+
   return (
     <div className="min-h-screen bg-white text-black">
       {/* Header */}
@@ -77,7 +123,7 @@ const StudentDashboard = () => {
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold">Student Dashboard</h1>
-            <p className="text-gray-300 text-sm">Welcome, {user?.name}</p>
+            <p className="text-gray-300 text-sm">Welcome, {user?.email}</p>
           </div>
           <button
             onClick={logout}
@@ -95,7 +141,7 @@ const StudentDashboard = () => {
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
             <FiFilter /> Filter Courses
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="relative">
               <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
               <input
@@ -119,32 +165,57 @@ const StudentDashboard = () => {
                 </option>
               ))}
             </select>
+
+            <select
+              value={selectedDepartment}
+              onChange={(e) => setSelectedDepartment(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg py-2 px-4 focus:outline-none focus:ring-2 focus:ring-black bg-white"
+            >
+              <option value="">All Departments</option>
+              {departments.map((dept) => (
+                <option key={dept} value={dept}>
+                  {dept}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
         {/* Courses */}
         <h2 className="text-2xl font-bold mb-4">Available Courses</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          {filteredCourses.map((course) => (
-            <div
-              key={course.id}
-              className="border border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all"
-            >
-              <h3 className="text-lg font-bold mb-2">{course.name}</h3>
-              <p className="text-sm text-gray-600 mb-1">Code: {course.code}</p>
-              <p className="text-sm text-gray-600 mb-1">Faculty: {course.faculty}</p>
-              <p className="text-sm text-gray-600 mb-4">Lecturer: {course.lecturerName}</p>
-              <button
-                onClick={() => {
-                  setSelectedCourse(course);
-                  setShowReminderModal(true);
-                }}
-                className="w-full flex items-center justify-center gap-2 bg-black text-white py-2 rounded-lg hover:bg-gray-800 transition-all"
+          {filteredCourses.map((course) => {
+            const nextLecture = lectures
+              .filter(l => l.courseId === course.id)
+              .sort((a, b) => new Date(a.date + ' ' + a.time).getTime() - new Date(b.date + ' ' + b.time).getTime())
+              .find(l => new Date(l.date + ' ' + l.time).getTime() > Date.now());
+
+            return (
+              <div
+                key={course.id}
+                className="border border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all"
               >
-                <FiPlus /> Set Reminder
-              </button>
-            </div>
-          ))}
+                <h3 className="text-lg font-bold mb-2">{course.name}</h3>
+                <p className="text-sm text-gray-600 mb-1">Code: {course.code}</p>
+                <p className="text-sm text-gray-600 mb-1">Faculty: {course.faculty}</p>
+                <p className="text-sm text-gray-600 mb-1">Department: {course.department}</p>
+                <p className="text-sm text-gray-600 mb-2">Lecturer: {course.lecturerName}</p>
+                {nextLecture ? (
+                  <p className="text-sm text-gray-600 mb-2">
+                    Next Lecture: {nextLecture.date} at {nextLecture.time}
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-600 mb-2 italic">No upcoming lectures</p>
+                )}
+                <button
+                  onClick={() => handleSelectCourse(course)}
+                  className="w-full flex items-center justify-center gap-2 bg-black text-white py-2 rounded-lg hover:bg-gray-800 transition-all"
+                >
+                  <FiPlus /> Set Reminder
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         {/* Reminders */}
@@ -184,7 +255,7 @@ const StudentDashboard = () => {
       </div>
 
       {/* Reminder Modal */}
-      {showReminderModal && selectedCourse && (
+      {showReminderModal && selectedCourse && selectedLecture && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-8 max-w-md w-full">
             <h2 className="text-2xl font-bold mb-2">Set Reminder</h2>

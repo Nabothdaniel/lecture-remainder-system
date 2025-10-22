@@ -1,112 +1,74 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiLogOut, FiBook } from "react-icons/fi";
+import { FiLogOut, FiBook, FiClock } from "react-icons/fi";
 import { signOut } from "firebase/auth";
-import { auth, db } from "@/firebase";
+import { auth } from "@/firebase";
 import { useUserStore } from "../store/authStore";
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  addDoc,
-  serverTimestamp,
-} from "firebase/firestore";
+import { useCourseStore } from "../store/coursesStore";
 import { toast } from "@/hooks/use-toast";
-
-interface Course {
-  id: string;
-  name: string;
-  code: string;
-  faculty: string;
-  department: string;
-  lecturerId: string;
-  lecturerName: string;
-}
 
 const LecturerDashboard = () => {
   const user = useUserStore((state) => state.user);
   const navigate = useNavigate();
 
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [reminderForm, setReminderForm] = useState({
+  // Zustand store
+  const { courses, lectures, loading, initSync, addLecture } = useCourseStore();
+
+  // Local state for lecture modal
+  const [selectedCourse, setSelectedCourse] = useState<typeof courses[0] | null>(null);
+  const [lectureForm, setLectureForm] = useState({
     date: "",
     time: "",
-    topic: "",
-    notes: "",
   });
-  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
 
-  // ✅ Fetch courses for the logged-in lecturer
+  // Sync courses + lectures for this lecturer
   useEffect(() => {
-    const fetchCourses = async () => {
-      if (!user?.uid) return;
-      try {
-        const q = query(
-          collection(db, "courses"),
-          where("lecturerId", "==", user.uid) // ✅  field name
-        );
-        const querySnapshot = await getDocs(q);
-        const coursesList = querySnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...(doc.data() as Course),
-        }));
-        setCourses(coursesList);
-      } catch (error) {
-        console.error("Error fetching courses:", error);
-        toast.error('Failed to load courses.",');
-      } finally {
-        setLoading(false);
-      }
-    };
+    if (!user?.uid) return;
+    const unsubscribe = initSync(true); // true = fetch only this lecturer's courses/lectures
+    return () => unsubscribe();
+  }, [user?.uid, initSync]);
 
-    fetchCourses();
-  }, [user?.uid]);
-
-  // ✅ Logout
+  // Logout
   const handleLogout = async () => {
     try {
       await signOut(auth);
       toast.success("Logged out successfully.");
       navigate("/auth");
     } catch (err) {
-      toast.error((err as Error).message);  
-       
-      console.error(err);
+      console.error("Logout error:", err);
+      toast.error((err as Error).message);
     }
   };
 
-  // ✅ Create Reminder
-  const handleCreateReminder = async (e: React.FormEvent) => {
+  // Create lecture
+  const handleCreateLecture = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCourse) return;
-    try {
-      await addDoc(collection(db, "reminders"), {
-        ...reminderForm,
-        courseId: selectedCourse.id,
-        courseName: selectedCourse.name,
-        lecturerId: user?.uid,
-        createdAt: serverTimestamp(),
-      });
+    if (!selectedCourse || !user?.uid) return;
 
-      toast.success("Reminder created successfully!");
-      setReminderForm({ date: "", time: "", topic: "", notes: "" });
+    const success = await addLecture({
+      courseId: selectedCourse.id,
+      courseName: selectedCourse.name,
+      lecturerId: user.uid,
+      date: lectureForm.date,
+      time: lectureForm.time,
+    });
+
+    if (success) {
+      toast.success("Lecture time set successfully!");
+      setLectureForm({ date: "", time: "" });
       setSelectedCourse(null);
-    } catch (error) {
-      console.error("Error adding reminder:", error);
-      toast.error("Failed to create reminder.");
-        
+    } else {
+      toast.error("Failed to set lecture time.");
     }
   };
 
-  // ✅ Loading state
-  if (loading)
+  if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen text-gray-600">
         Loading your courses...
       </div>
     );
+  }
 
   return (
     <div className="min-h-screen bg-white text-black">
@@ -137,83 +99,70 @@ const LecturerDashboard = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {courses.map((course) => (
-              <div
-                key={course.id}
-                className="bg-gray-50 border border-gray-200 rounded-xl p-6 hover:bg-gray-100 transition-all"
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div className="bg-black p-3 rounded-lg">
-                    <FiBook className="text-white text-xl" />
-                  </div>
-                </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">
-                  {course.name}
-                </h3>
-                <p className="text-gray-600 text-sm mb-1">Code: {course.code}</p>
-                <p className="text-gray-600 text-sm mb-4">
-                  Faculty: {course.faculty}
-                </p>
-                <button
-                  onClick={() => setSelectedCourse(course)}
-                  className="w-full bg-black hover:bg-gray-800 text-white font-semibold py-2 rounded-lg transition-all"
+            {courses.map((course) => {
+              // Check if lecture exists for this course
+              const lecture = lectures.find(l => l.courseId === course.id);
+              return (
+                <div
+                  key={course.id}
+                  className="bg-gray-50 border border-gray-200 rounded-xl p-6 hover:bg-gray-100 transition-all"
                 >
-                  Set Lecture Reminder
-                </button>
-              </div>
-            ))}
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="bg-black p-3 rounded-lg">
+                      <FiBook className="text-white text-xl" />
+                    </div>
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">{course.name}</h3>
+                  <p className="text-gray-600 text-sm mb-1">Code: {course.code}</p>
+                  <p className="text-gray-600 text-sm mb-2">Faculty: {course.faculty}</p>
+
+                  {lecture ? (
+                    <div className="flex items-center gap-2 mb-2">
+                      <FiClock className="text-gray-600" />
+                      <span className="text-gray-800 text-sm">
+                        Lecture: {lecture.date} at {lecture.time}
+                      </span>
+                    </div>
+                  ) : null}
+
+                  <button
+                    onClick={() => setSelectedCourse(course)}
+                    className="w-full bg-black hover:bg-gray-800 text-white font-semibold py-2 rounded-lg transition-all"
+                  >
+                    {lecture ? "Update Lecture Time" : "Set Lecture Time"}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Reminder Modal */}
+      {/* Lecture Modal */}
       {selectedCourse && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <form
-            onSubmit={handleCreateReminder}
+            onSubmit={handleCreateLecture}
             className="bg-white rounded-xl p-8 shadow-lg max-w-md w-full"
           >
             <h3 className="text-xl font-semibold mb-4 text-gray-900">
-              Set Reminder for {selectedCourse.name}
+              {selectedCourse.name} - Set Lecture Time
             </h3>
 
             <input
               type="date"
               className="w-full border border-gray-300 rounded-lg p-3 mb-3"
-              value={reminderForm.date}
-              onChange={(e) =>
-                setReminderForm({ ...reminderForm, date: e.target.value })
-              }
+              value={lectureForm.date}
+              onChange={(e) => setLectureForm({ ...lectureForm, date: e.target.value })}
               required
             />
 
             <input
               type="time"
               className="w-full border border-gray-300 rounded-lg p-3 mb-3"
-              value={reminderForm.time}
-              onChange={(e) =>
-                setReminderForm({ ...reminderForm, time: e.target.value })
-              }
+              value={lectureForm.time}
+              onChange={(e) => setLectureForm({ ...lectureForm, time: e.target.value })}
               required
-            />
-
-            <input
-              type="text"
-              placeholder="Topic (optional)"
-              className="w-full border border-gray-300 rounded-lg p-3 mb-3"
-              value={reminderForm.topic}
-              onChange={(e) =>
-                setReminderForm({ ...reminderForm, topic: e.target.value })
-              }
-            />
-
-            <textarea
-              placeholder="Notes (optional)"
-              className="w-full border border-gray-300 rounded-lg p-3 mb-3"
-              value={reminderForm.notes}
-              onChange={(e) =>
-                setReminderForm({ ...reminderForm, notes: e.target.value })
-              }
             />
 
             <div className="flex justify-end gap-3">
@@ -228,7 +177,7 @@ const LecturerDashboard = () => {
                 type="submit"
                 className="px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800"
               >
-                Save Reminder
+                Save Lecture Time
               </button>
             </div>
           </form>

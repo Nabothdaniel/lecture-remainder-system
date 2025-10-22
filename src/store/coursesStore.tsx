@@ -48,13 +48,28 @@ export interface Lecturer {
 export interface Reminder {
   id: string;
   courseId: string;
-  studentId: string;
+  studentId?: string;
   date: string;
+  courseName?: string;
   time: string;
   topic: string;
+  lecturerId?: string;
+  lectureId?: string;
   notes?: string;
   createdAt?: Timestamp;
 }
+
+
+export interface Lecture {
+  id: string;
+  courseId: string;
+  courseName: string;
+  lecturerId: string;
+  date: string;
+  time: string;
+  createdAt?: Timestamp;
+}
+
 
 // ─────────────────────────────
 // Helper: Get Current User
@@ -72,6 +87,7 @@ const getCurrentUser = (): ExtendedUser => {
 interface CourseState {
   courses: Course[];
   lecturers: Lecturer[];
+  lectures: Lecture[];
   reminders: Reminder[];
   loading: boolean;
   error: string | null;
@@ -84,8 +100,13 @@ interface CourseState {
   updateCourse: (id: string, course: Partial<Course>) => Promise<boolean>;
   deleteCourse: (id: string) => Promise<boolean>;
 
+  //lecture CRUD
+  addLecture: (lecture: Omit<Lecture, "id" | "createdAt">) => Promise<boolean>;
+  updateLecture: (id: string, lecture: Partial<Lecture>) => Promise<boolean>;
+  deleteLecture: (id: string) => Promise<boolean>;
+
   // Lecturer CRUD (admin only)
-  addLecturer: (lecturer: Omit<Lecturer, "id">) => Promise<boolean>;
+  addLecturer: (lecturer: Omit<Lecturer, "id">) => Promise<string | null>;
   updateLecturer: (id: string, lecturer: Partial<Lecturer>) => Promise<boolean>;
   deleteLecturer: (id: string) => Promise<boolean>;
 
@@ -97,6 +118,7 @@ interface CourseState {
 export const useCourseStore = create<CourseState>((set) => ({
   courses: [],
   lecturers: [],
+  lectures: [],
   reminders: [],
   loading: false,
   error: null,
@@ -108,7 +130,7 @@ export const useCourseStore = create<CourseState>((set) => ({
     set({ loading: true });
     const currentUser = getCurrentUser();
 
-    // Lecturer sees only their courses
+    // Courses query
     const courseRef = forLecturer
       ? query(collection(db, "courses"), where("lecturerId", "==", currentUser.uid))
       : collection(db, "courses");
@@ -118,10 +140,10 @@ export const useCourseStore = create<CourseState>((set) => ({
       (snapshot) => {
         const courseList: Course[] = snapshot.docs.map(
           (docSnap) =>
-            ({
-              id: docSnap.id,
-              ...docSnap.data(),
-            } as Course)
+          ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          } as Course)
         );
         set({ courses: courseList, loading: false });
       },
@@ -131,26 +153,26 @@ export const useCourseStore = create<CourseState>((set) => ({
       }
     );
 
-    // Admins only
+    // Lecturers (admin only)
     const unsubLecturers = forLecturer
-      ? () => {}
+      ? () => { }
       : onSnapshot(
-          collection(db, "lecturers"),
-          (snapshot) => {
-            const lecturerList: Lecturer[] = snapshot.docs.map(
-              (docSnap) =>
-                ({
-                  id: docSnap.id,
-                  ...docSnap.data(),
-                } as Lecturer)
-            );
-            set({ lecturers: lecturerList });
-          },
-          (error) => {
-            console.error("Lecturers snapshot error:", error);
-            set({ error: error.message });
-          }
-        );
+        collection(db, "lecturers"),
+        (snapshot) => {
+          const lecturerList: Lecturer[] = snapshot.docs.map(
+            (docSnap) =>
+            ({
+              id: docSnap.id,
+              ...docSnap.data(),
+            } as Lecturer)
+          );
+          set({ lecturers: lecturerList });
+        },
+        (error) => {
+          console.error("Lecturers snapshot error:", error);
+          set({ error: error.message });
+        }
+      );
 
     // Shared reminders
     const unsubReminders = onSnapshot(
@@ -158,10 +180,10 @@ export const useCourseStore = create<CourseState>((set) => ({
       (snapshot) => {
         const reminderList: Reminder[] = snapshot.docs.map(
           (docSnap) =>
-            ({
-              id: docSnap.id,
-              ...docSnap.data(),
-            } as Reminder)
+          ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          } as Reminder)
         );
         set({ reminders: reminderList });
       },
@@ -171,10 +193,27 @@ export const useCourseStore = create<CourseState>((set) => ({
       }
     );
 
+    const lectureRef = forLecturer
+      ? query(collection(db, "lectures"), where("lecturerId", "==", currentUser.uid))
+      : collection(db, "lectures");
+
+    const unsubLectures = onSnapshot(
+      lectureRef,
+      (snapshot) => {
+        const lectureList: Lecture[] = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        } as Lecture));
+        set({ lectures: lectureList });
+      },
+      (error) => set({ error: error.message })
+    );
+
     return () => {
       unsubCourses();
       unsubLecturers();
       unsubReminders();
+      unsubLectures();
       set({ loading: false });
     };
   },
@@ -182,12 +221,13 @@ export const useCourseStore = create<CourseState>((set) => ({
   // ─────────────────────────────
   // COURSE CRUD
   // ─────────────────────────────
-  addCourse: async (course) => {
+  addCourse: async (course: Omit<Course, "id"> & { lecturerUid: string }) => {
     try {
-      const user = getCurrentUser();
+      const adminUser = getCurrentUser(); // Admin creating course
       await addDoc(collection(db, "courses"), {
         ...course,
-        createdBy: user.uid,
+        lecturerId: course.lecturerId, // lecturer UID  
+        createdBy: adminUser.uid,       // admin UID
         createdAt: serverTimestamp(),
       });
       return true;
@@ -225,7 +265,7 @@ export const useCourseStore = create<CourseState>((set) => ({
   // ─────────────────────────────
   addLecturer: async (lecturer) => {
     try {
-      const currentUser = getCurrentUser();
+      const adminUser = getCurrentUser(); // Admin UID
 
       const userCredential = await createUserWithEmailAndPassword(
         secondaryAuth,
@@ -234,14 +274,16 @@ export const useCourseStore = create<CourseState>((set) => ({
       );
       const firebaseUid = userCredential.user.uid;
 
+      // ✅ Save lecturer with correct UID
       await addDoc(collection(db, "lecturers"), {
         ...lecturer,
         uid: firebaseUid,
         role: "lecturer",
-        createdBy: currentUser.uid,
+        createdBy: adminUser.uid, // admin who created
         createdAt: serverTimestamp(),
       });
 
+      // Save in main users collection
       await setDoc(doc(db, "users", firebaseUid), {
         name: lecturer.name,
         email: lecturer.email,
@@ -252,11 +294,11 @@ export const useCourseStore = create<CourseState>((set) => ({
 
       await secondaryAuth.signOut();
 
-      return true;
+      return firebaseUid; // ✅ return lecturer UID for course assignment
     } catch (error: any) {
       console.error("Add lecturer error:", error);
       set({ error: error.message });
-      return false;
+      return null;
     }
   },
 
@@ -281,6 +323,46 @@ export const useCourseStore = create<CourseState>((set) => ({
       return false;
     }
   },
+
+// Lecture CRUD (lecturer)
+addLecture: async (lecture: Omit<Lecture, "id" | "createdAt">) => {
+  try {
+    await addDoc(collection(db, "lectures"), {
+      ...lecture,
+      createdAt: serverTimestamp(),
+    });
+    return true;
+  } catch (error: any) {
+    console.error("Add lecture error:", error);
+    set({ error: error.message });
+    return false;
+  }
+},
+
+updateLecture: async (id: string, lecture: Partial<Lecture>) => {
+  try {
+    await updateDoc(doc(db, "lectures", id), lecture);
+    return true;
+  } catch (error: any) {
+    console.error("Update lecture error:", error);
+    set({ error: error.message });
+    return false;
+  }
+},
+
+deleteLecture: async (id: string) => {
+  try {
+    await deleteDoc(doc(db, "lectures", id));
+    return true;
+  } catch (error: any) {
+    console.error("Delete lecture error:", error);
+    set({ error: error.message });
+    return false;
+  }
+
+},
+
+// ─────────────────────────────
 
   // ─────────────────────────────
   // REMINDERS
@@ -310,3 +392,4 @@ export const useCourseStore = create<CourseState>((set) => ({
     }
   },
 }));
+
