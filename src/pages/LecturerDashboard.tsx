@@ -28,17 +28,10 @@ const LecturerDashboard = () => {
     return () => unsubscribe();
   }, [user?.uid, initSync]);
 
-  // Logout
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      toast.success("Logged out successfully.");
-      navigate("/auth");
-    } catch (err) {
-      console.error("Logout error:", err);
-      toast.error((err as Error).message);
-    }
-  };
+ const handleLogout = async () => {
+  const { logout } = useUserStore.getState(); // Access Zustand logout directly
+  await logout(); // Store handles toast + redirect
+};
 
   // Create lecture
   const handleCreateLecture = async (e: React.FormEvent) => {

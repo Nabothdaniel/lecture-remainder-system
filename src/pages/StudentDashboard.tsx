@@ -1,17 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useUserStore } from '../store/authStore';
 import { useCourseStore, Course, Lecture } from '../store/coursesStore';
-import { FiLogOut, FiSearch,  FiPlus, FiTrash2, FiBell, FiFilter } from 'react-icons/fi';
-import { signOut } from 'firebase/auth';
-import { auth } from '@/firebase';
-import { useNavigate } from 'react-router-dom';
-import { toast } from '@/hooks/use-toast';
+import { FiLogOut, FiSearch, FiPlus, FiTrash2, FiBell, FiFilter } from 'react-icons/fi';
 import axios from 'axios';
+import { toast } from '@/hooks/use-toast';
 
 const StudentDashboard = () => {
-  const logout = useUserStore((state) => state.logout);
   const user = useUserStore((state) => state.user);
-  const navigate = useNavigate();
 
   // Zustand store
   const { courses, lectures, reminders, addReminder, deleteReminder } = useCourseStore();
@@ -31,8 +26,17 @@ const StudentDashboard = () => {
     notes: '',
   });
 
+  useEffect(() => {
+    const unsubscribe = useCourseStore.getState().initSync();
+    return () => unsubscribe(); // cleanup on unmount
+  }, []);
+
   const faculties = Array.from(new Set(courses.map(c => c.faculty)));
   const departments = Array.from(new Set(courses.map(c => c.department)));
+
+
+
+
 
   // Filter courses by search, faculty, and department
   const filteredCourses = courses.filter(course => {
@@ -83,9 +87,8 @@ const StudentDashboard = () => {
         ...reminderForm,
       });
 
-      await axios.post(`${import.meta.env.VITE_API_URL}/send-reminder-email`, {
+      await axios.post(`https://exam-malpractice-backend.onrender.com/api/reminder/send`, {
         email: user.email,
-        name: user.name,
         courseName: selectedCourse.name,
         topic: reminderForm.topic,
         date: reminderForm.date,
@@ -93,28 +96,24 @@ const StudentDashboard = () => {
         notes: reminderForm.notes,
       });
 
+        toast.success("Reminder set and email sent successfully!");
+
       setReminderForm({ date: '', time: '', topic: '', notes: '' });
       setSelectedCourse(null);
       setSelectedLecture(null);
       setShowReminderModal(false);
     } catch (error) {
       console.error("Error setting reminder:", error);
-      alert("Failed to set reminder or send email. Try again.");
+      toast.error("Failed to set reminder or send email. Try again.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleLogout = async () => {
-      try {
-        await signOut(auth);
-        toast.success("Logged out successfully.");
-        navigate("/auth");
-      } catch (err) {
-        console.error("Logout error:", err);
-        toast.error((err as Error).message);
-      }
-    };
+    const { logout } = useUserStore.getState(); // Access Zustand logout directly
+    await logout(); // Store handles toast + redirect
+  };
 
   return (
     <div className="min-h-screen bg-white text-black">
@@ -126,7 +125,7 @@ const StudentDashboard = () => {
             <p className="text-gray-300 text-sm">Welcome, {user?.email}</p>
           </div>
           <button
-            onClick={logout}
+            onClick={handleLogout}
             className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded-md hover:bg-gray-200 transition-all"
           >
             <FiLogOut /> Logout
@@ -243,7 +242,7 @@ const StudentDashboard = () => {
                   )}
                   <button
                     onClick={() => deleteReminder(reminder.id)}
-                    className="w-full bg-red-500 text-white py-2 rounded-lg hover:bg-red-600 transition-all"
+                    className=" inline-flex items-center justify-center gap-2 w-full bg-red-500 text-white py-2 rounded-lg hover:bg-red-600 transition-all"
                   >
                     <FiTrash2 /> Delete
                   </button>

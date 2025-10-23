@@ -74,12 +74,13 @@ export interface Lecture {
 // ─────────────────────────────
 // Helper: Get Current User
 // ─────────────────────────────
-const getCurrentUser = (): ExtendedUser => {
+// In coursesStore.tsx
+const getCurrentUser = (): ExtendedUser | null => {
   const { user, loading } = useUserStore.getState();
-  if (loading) throw new Error("User is still loading");
-  if (!user) throw new Error("User not logged in");
+  if (loading) return null; 
   return user;
 };
+
 
 // ─────────────────────────────
 // Zustand Store

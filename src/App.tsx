@@ -4,9 +4,11 @@ import { useUserStore } from "./store/authStore";
 
 
 const App = () => {
+    const initAuth = useUserStore((s) => s.initAuth);
+
   useEffect(() => {
-  useUserStore.getState().initAuth();
-}, []);
+    initAuth();
+  }, []);
 
 
   return( <Outlet />)
