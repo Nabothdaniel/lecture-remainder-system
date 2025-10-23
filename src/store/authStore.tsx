@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import { signOut, onAuthStateChanged, createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "@/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
+import { toast } from "@/hooks/use-toast";
 
 export type UserRole = "student" | "lecturer" | "admin";
 
@@ -25,23 +26,20 @@ interface UserState {
     email: string;
     faculty: string;
     department: string;
-  }) => Promise<string>; // returns generated password
+  }) => Promise<string>;
 }
 
-// Utility to generate random password
 const generatePassword = (length = 8) => {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%";
-  let pass = "";
-  for (let i = 0; i < length; i++) {
-    pass += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return pass;
+  return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
 };
 
-// explicitly type StateCreator
 const createUserState: StateCreator<UserState> = (set, get) => {
   const initAuth = () => {
-    set({ loading: true });
+    if ((window as any)._authListenerInitialized) return;
+    (window as any)._authListenerInitialized = true;
+
+    if (!get().user) set({ loading: true });
 
     onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
@@ -60,22 +58,37 @@ const createUserState: StateCreator<UserState> = (set, get) => {
             loading: false,
           });
         } catch (error) {
-          console.error("Failed to fetch user data:", error);
+          console.error("❌ Failed to fetch user data:", error);
           set({ user: null, loading: false });
+          toast.error("Failed to load user data");
         }
       } else {
+        // ✅ User is fully signed out
         set({ user: null, loading: false });
+        localStorage.removeItem("user-storage"); // clear persisted user
+        if (window.location.pathname !== "/auth") {
+          window.location.href = "/auth";
+        }
       }
     });
   };
 
   const logout = async () => {
-    set({ loading: true });
-    await signOut(auth);
-    set({ user: null, loading: false });
+    try {
+      set({ loading: true });
+      await signOut(auth);
+      set({ user: null, loading: false });
+      localStorage.removeItem("user-storage"); // 🧹 remove persisted data immediately
+      toast.success("Logged out successfully");
+      window.location.href = "/auth";
+    } catch (err) {
+      console.error("Logout error:", err);
+      toast.error("Failed to logout");
+      set({ loading: false });
+    }
   };
 
- const createLecturer = async (lecturer: {
+  const createLecturer = async (lecturer: {
     name: string;
     email: string;
     faculty: string;
@@ -84,17 +97,14 @@ const createUserState: StateCreator<UserState> = (set, get) => {
     const password = generatePassword();
 
     try {
-      // 1️⃣ Create Firebase Auth user
       const cred = await createUserWithEmailAndPassword(auth, lecturer.email, password);
 
-      // 2️⃣ Store lecturer in 'lecturers' collection (without password for security)
       await setDoc(doc(db, "lecturers", cred.user.uid), {
         ...lecturer,
         role: "lecturer",
         uid: cred.user.uid,
       });
 
-      // 3️⃣ Store user info in 'users' collection (used by zustand store)
       await setDoc(doc(db, "users", cred.user.uid), {
         name: lecturer.name,
         email: lecturer.email,
@@ -102,18 +112,15 @@ const createUserState: StateCreator<UserState> = (set, get) => {
         uid: cred.user.uid,
       });
 
-      // 4️⃣ Copy password to clipboard for immediate use
       await navigator.clipboard.writeText(password);
-
+      toast.success("Lecturer created successfully! Password copied to clipboard.");
       return password;
     } catch (err: any) {
       console.error("Failed to create lecturer:", err);
+      toast.error("Failed to create lecturer");
       throw new Error(err.message || "Failed to create lecturer");
     }
   };
-
-  // call initAuth immediately to restore user on page reload
-  initAuth();
 
   return {
     user: null,
@@ -130,5 +137,8 @@ export const useUserStore = create<UserState>()(
   persist(createUserState, {
     name: "user-storage",
     partialize: (state) => ({ user: state.user }),
+    onRehydrateStorage: () => (state) => {
+      if (state) state.setLoading(false);
+    },
   })
 );

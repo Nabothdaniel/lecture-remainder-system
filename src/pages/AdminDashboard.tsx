@@ -114,15 +114,9 @@ const AdminDashboard = () => {
   };
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      toast.success("Logged out successfully");
-      navigate("/auth");
-    } catch (err) {
-      toast.error("Failed to logout");
-      console.error(err);
-    }
-  };
+  const { logout } = useUserStore.getState(); // Access Zustand logout directly
+  await logout(); // Store handles toast + redirect
+};
 
   const handleSaveCourse = async (e: React.FormEvent) => {
     e.preventDefault();
